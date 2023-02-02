@@ -45,7 +45,7 @@ def add_config(parser):
     parser.add_argument('--seed', type=int, default=1234, metavar='S', help='Random seed (default: 1234).')
     parser.add_argument('--dataset', type=str, default='KITTISceneFlowDataset',
                         choices=['FlyingThings3D', 'KITTISceneFlowDataset', 'ArgoverseSceneFlowDataset', 
-                                 'NuScenesSceneFlowDataset'], metavar='N',
+                                 'NuScenesSceneFlowDataset', 'WaymoSceneFlowDataset'], metavar='N',
                         help='Dataset to use.')
     parser.add_argument('--dataset_path', type=str, default='./dataset/kitti', metavar='N',
                         help='Dataset path.')

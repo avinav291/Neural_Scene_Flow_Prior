@@ -53,7 +53,7 @@ Just run following lines for a simple optimization on a small KITTI Scene Flow d
 ```
 python optimization.py \
 --dataset KITTISceneFlowDataset \
---dataset_path dataset/kitti \
+--dataset_path /scratch/ag7644/kitti \
 --exp_name KITTI_2048_points \
 --batch_size 1 \
 --iters 5000 \
@@ -92,7 +92,7 @@ python optimization.py \
 ```
 python optimization.py \
 --dataset ArgoverseSceneFlowDataset \
---dataset_path dataset/argoverse \
+--dataset_path /scratch/ag7644/argoverse \
 --exp_name Argoverse_2048_points \
 --batch_size 1 \
 --iters 5000 \
@@ -140,6 +140,22 @@ python optimization.py \
 ```
 
 #### 2. dense point cloud (all points included)
+
+#### Waymo Scene Flow
+```
+python optimization.py \
+--dataset WaymoSceneFlowDataset \
+--dataset_path /scratch/ag7644/waymo_sf/train \
+--exp_name waymo_sf_train \
+--batch_size 1 \
+--iters 5000 \
+--use_all_points \
+--compute_metrics \
+--hidden_units 128 \
+--lr 0.001  \
+--backward_flow  \
+--early_patience 300
+```
 
 #### KITTI Scene Flow
 ```

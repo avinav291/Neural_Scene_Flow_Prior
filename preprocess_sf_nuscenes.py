@@ -13,6 +13,7 @@ from pyquaternion import Quaternion
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.splits import create_splits_scenes
+from typing import Optional, TypeVar
 
 
 @dataclass
@@ -549,7 +550,7 @@ def draw_alpha_rectangle(
 
 
 if __name__ == "__main__":
-    dataset_path = '/dataset/nuscenes'   # NOTE: path to the original dataset
+    dataset_path = '/scratch/ag7644/nuscenes'   # NOTE: path to the original dataset
     
     # ANCHOR: hyperparameters
     channel = 'LIDAR_TOP'

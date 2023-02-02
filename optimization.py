@@ -16,7 +16,7 @@ from tqdm import tqdm
 from model import Neural_Prior
 import config
 from data import (ArgoverseSceneFlowDataset, KITTISceneFlowDataset,
-                  NuScenesSceneFlowDataset, FlyingThings3D)
+                  NuScenesSceneFlowDataset, FlyingThings3D, WaymoSceneFlowDataset)
 from utils import scene_flow_metrics, Timers, GeneratorWrap, EarlyStopping
 from loss import my_chamfer_fn
 from visualize import show_flows, flow_to_rgb, custom_draw_geometry_with_key_callback
@@ -149,7 +149,8 @@ def solver(
         'angle_error_1': best_angle_error_1,
         'outlier_1': best_outliers_1,
         'time': time_avg,
-        'epoch': best_epoch
+        'epoch': best_epoch,
+        'best_flow_1':best_flow_1.detach().cpu().numpy()
     }
 
     # NOTE: visualization
@@ -188,7 +189,10 @@ def optimize_neural_prior(options, data_loader):
     if options.model == 'neural_prior':
         net = Neural_Prior(filter_size=options.hidden_units, act_fn=options.act_fn, layer_size=options.layer_size).cuda()
     else:
-        raise Exception("Model not available.")    
+        raise Exception("Model not available.")
+
+    output_dir = os.path.join(save_dir_path,'sceneflow_nsfp')
+    os.makedirs(output_dir,exist_ok=True)  
 
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader), smoothing=0.9):
         logging.info(f"# Working on sample: {data_loader.dataset.datapath[i]}...")
@@ -208,7 +212,9 @@ def optimize_neural_prior(options, data_loader):
         else:
             for _ in solver_generator: pass
             info_dict = solver_generator.value
-
+        # Save flow
+        name = 'frame_'+ '%06d' % i + '.npz'
+        np.savez(os.path.join(output_dir,name),p1=pc1,flow = info_dict['best_flow_1'])
         # Collect results.
         info_dict['filepath'] = data_loader.dataset.datapath[i]
         outputs.append(info_dict)
@@ -221,9 +227,11 @@ def optimize_neural_prior(options, data_loader):
         logging.info(timers.print())
 
     df = pd.DataFrame(outputs)
-    df.loc['mean'] = df.mean()
+    if len(df) !=  0:
+        df.loc['mean'] = df.mean()
     logging.info(df.mean())
-    df.loc['total time'] = time_avg
+    if len(df) !=  0:
+        df.loc['total time'] = time_avg
     df.to_csv('{:}.csv'.format(f"{save_dir_path}/results"))
 
     logging.info("Finish optimization!")
@@ -273,10 +281,15 @@ if __name__ == "__main__":
             ArgoverseSceneFlowDataset(options=options, partition=options.partition),
             batch_size=options.batch_size, shuffle=False, drop_last=False, num_workers=12
         )
+    elif options.dataset == "WaymoSceneFlowDataset":
+        data_loader = DataLoader(
+            WaymoSceneFlowDataset(options=options, train=True),
+            batch_size=options.batch_size, shuffle=False, drop_last=False, num_workers=12
+        )
     elif options.dataset == "NuScenesSceneFlowDataset":
         data_loader = DataLoader(
             NuScenesSceneFlowDataset(options=options, partition="val"),
             batch_size=options.batch_size, shuffle=False, drop_last=False, num_workers=12
         )
-
+        
     optimize_neural_prior(options, data_loader)
