@@ -71,11 +71,30 @@ We provide commands we used to generate results in the small point coud (2048 po
 
 #### 1. small point cloud (2048 points)
 
+#### Waymo Scene Flow
+```
+python optimization.py \
+--dataset WaymoSceneFlowDataset \
+--dataset_path /scratch/ag7644/waymo_sf_debug11 \
+--exp_name waymo_sf_debug11_2_vis \
+--batch_size 1 \
+--use_all_points \
+--iters 500 \
+--compute_metrics \
+--hidden_units 128 \
+--lr 0.001  \
+--backward_flow  \
+--early_patience 300 \
+--visualize \
+--load_model_path "/scratch/ag7644/nsfp/checkpoints/waymo_sf_train_1/model/model_best.pth"
+```
+--use_all_points \
+
 #### KITTI Scene Flow
 ```
 python optimization.py \
 --dataset KITTISceneFlowDataset \
---dataset_path dataset/kitti \
+--dataset_path /scratch/ag7644/kitti \
 --exp_name KITTI_2048_points \
 --batch_size 1 \
 --iters 5000 \
@@ -146,7 +165,7 @@ python optimization.py \
 python optimization.py \
 --dataset WaymoSceneFlowDataset \
 --dataset_path /scratch/ag7644/waymo_sf/train \
---exp_name waymo_sf_train \
+--exp_name waymo_sf_train_11 \
 --batch_size 1 \
 --iters 5000 \
 --use_all_points \
@@ -161,8 +180,8 @@ python optimization.py \
 ```
 python optimization.py \
 --dataset KITTISceneFlowDataset \
---dataset_path dataset/kitti \
---exp_name KITTI_2048_points \
+--dataset_path /scratch/ag7644/kitti \
+--exp_name KITTI \
 --batch_size 1 \
 --iters 5000 \
 --compute_metrics \
@@ -177,8 +196,9 @@ python optimization.py \
 ```
 python optimization.py \
 --dataset ArgoverseSceneFlowDataset \
---dataset_path dataset/argoverse \
---exp_name Argoverse_2048_points \
+--dataset_path /scratch/ag7644/argoverse/Argoverse_SceneFlow_remove_ground \
+--partition train \
+--exp_name Argoverse_train4 \
 --batch_size 1 \
 --iters 5000 \
 --compute_metrics \
@@ -187,8 +207,31 @@ python optimization.py \
 --lr 0.003 \
 --backward_flow \
 --early_patience 100 \
---visualize
+--visualize \
+--load_model_path "/scratch/ag7644/nsfp/checkpoints/Argoverse_train2/model/model_best.pth"
+
 ```
+
+```
+python optimization.py \
+--dataset ArgoverseSceneFlowDataset \
+--dataset_path /scratch/ag7644/argoverse/Argoverse_SceneFlow_ins \
+--partition train \
+--exp_name Argoverse_train_ins_bbox_4 \
+--batch_size 1 \
+--iters 5000 \
+--compute_metrics \
+--use_all_points \
+--hidden_units 128 \
+--lr 0.003 \
+--backward_flow \
+--early_patience 100 \
+--visualize \
+--load_model_path "/scratch/ag7644/nsfp/checkpoints/Argoverse_train_ins_3/model/model_latest.pth"
+
+```
+
+
 
 ---
 

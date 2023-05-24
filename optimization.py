@@ -18,8 +18,8 @@ import config
 from data import (ArgoverseSceneFlowDataset, KITTISceneFlowDataset,
                   NuScenesSceneFlowDataset, FlyingThings3D, WaymoSceneFlowDataset)
 from utils import scene_flow_metrics, Timers, GeneratorWrap, EarlyStopping
-from loss import my_chamfer_fn
-from visualize import show_flows, flow_to_rgb, custom_draw_geometry_with_key_callback
+from loss import chamfer_loss, my_chamfer_fn, component_loss, component_bbox
+from visualize import show_flows, flow_to_rgb, custom_draw_geometry_with_key_callback, custom_draw_geometry_with_camera_trajectory
 
 
 device = torch.device("cuda:0")
@@ -60,9 +60,16 @@ def solver(
         timers = Timers()
         timers.tic("solver_timer")
 
-    pc1 = pc1.cuda().contiguous()
-    pc2 = pc2.cuda().contiguous()
+    ins_mask1, ins_mask2 = None, None
+    if pc1.shape[-1]>3 and pc2.shape[-1]>3:
+        ins_mask1 = pc1[:, :, -1:].cuda().contiguous()
+        ins_mask2 = pc2[:, :, -1:].cuda().contiguous()
+    
+    pc1 = pc1[:, :, :3].cuda().contiguous()
+    pc2 = pc2[:, :, :3].cuda().contiguous()
     flow = flow.cuda().contiguous()
+    
+        
 
     normal1 = None
     normal2 = None
@@ -76,23 +83,29 @@ def solver(
     best_angle_error_1 = 1.
     best_outliers_1 = 1.
     best_epoch = 0
+
+    #BBOX Query Strategy for finding nearest instance points
+    ins_mask2 = component_bbox(pc1, pc2, ins_mask1) if ins_mask1 is not None else None
     
     for epoch in range(options.iters):
         optimizer.zero_grad()
 
         flow_pred_1 = net(pc1)
         pc1_deformed = pc1 + flow_pred_1
-        loss_chamfer_1, _ = my_chamfer_fn(pc2, pc1_deformed, normal2, normal1)
+        # loss_chamfer_1, _ = my_chamfer_fn(pc2, pc1_deformed, normal2, normal1)
+        loss_chamfer_1, _ = chamfer_loss(pc2, pc1_deformed, normal2, normal1, ins_mask1=ins_mask2, ins_mask2=ins_mask1)
+        loss_component = component_loss(flow_pred_1, ins_mask1)
         
         if options.backward_flow:
             flow_pred_1_prime = net_inv(pc1_deformed)
             pc1_prime_deformed = pc1_deformed - flow_pred_1_prime
-            loss_chamfer_1_prime, _ = my_chamfer_fn(pc1_prime_deformed, pc1, normal2, normal1)
+            # loss_chamfer_1_prime, _ = my_chamfer_fn(pc1_prime_deformed, pc1, normal2, normal1)
+            loss_chamfer_1_prime, _ = chamfer_loss(pc1_prime_deformed, pc1, normal2, normal1, ins_mask1=ins_mask1, ins_mask2=ins_mask1)
         
         if options.backward_flow:
-            loss_chamfer = loss_chamfer_1 + loss_chamfer_1_prime
+            loss_chamfer = loss_chamfer_1 + loss_chamfer_1_prime + loss_component
         else:
-            loss_chamfer = loss_chamfer_1
+            loss_chamfer = loss_chamfer_1 + loss_component
 
         loss = loss_chamfer
 
@@ -114,8 +127,11 @@ def solver(
             best_angle_error_1 = angle_error_1
             best_outliers_1 = outlier_1
             best_epoch = epoch
+            torch.save(net.state_dict(), f"{options.exp_dir_path}/model/model_best.pth")
+
             
         if epoch % 50 == 0:
+            torch.save(net.state_dict(), f"{options.exp_dir_path}/model/model_latest.pth")
             logging.info(f"[Sample: {i}]"
                         f"[Ep: {epoch}] [Loss: {loss:.5f}] "
                         f" Metrics: flow 1 --> flow 2"
@@ -155,24 +171,37 @@ def solver(
 
     # NOTE: visualization
     if options.visualize:
-        fig = plt.figure(figsize=(13, 5))
-        ax = fig.gca()
-        ax.plot(total_losses, label="loss")
-        ax.legend(fontsize="14")
-        ax.set_xlabel("Iteration", fontsize="14")
-        ax.set_ylabel("Loss", fontsize="14")
-        ax.set_title("Loss vs iterations", fontsize="14")
-        plt.show()
+        # fig = plt.figure(figsize=(13, 5))
+        # ax = fig.gca()
+        # ax.plot(total_losses, label="loss")
+        # ax.legend(fontsize="14")
+        # ax.set_xlabel("Iteration", fontsize="14")
+        # ax.set_ylabel("Loss", fontsize="14")
+        # ax.set_title("Loss vs iterations", fontsize="14")
+        # plt.show()
 
         idx = 0   
-        show_flows(pc1[idx], pc2[idx], best_flow_1[idx])
+        show_flows(pc1[idx], pc2[idx], best_flow_1[idx], options.exp_dir_path, sample_id=i, output_name='pred')
         
         # ANCHOR: new plot style
-        pc1_o3d = o3d.geometry.PointCloud()
-        colors_flow = flow_to_rgb(flow[0].cpu().numpy().copy())
-        pc1_o3d.points = o3d.utility.Vector3dVector(pc1[0].cpu().numpy().copy())
-        pc1_o3d.colors = o3d.utility.Vector3dVector(colors_flow / 255.0)
-        custom_draw_geometry_with_key_callback([pc1_o3d])  # Press 'k' to see with dark background.
+        # pc1_o3d = o3d.geometry.PointCloud()
+        # colors_flow = flow_to_rgb(flow[0].cpu().numpy().copy(), background = 'dark')
+        # pc1_o3d.points = o3d.utility.Vector3dVector(pc1[0].cpu().numpy().copy())
+        # pc1_o3d.colors = o3d.utility.Vector3dVector(colors_flow / 255.0)
+        # custom_draw_geometry_with_camera_trajectory(pc1_o3d, "camera_trajectory.json",
+                                                    # "renderoption.json",
+                                                    # options.exp_dir_path)
+        # custom_draw_geometry_with_camera_trajectory(pc1_o3d, options.exp_dir_path)
+        # vis = o3d.visualization.Visualizer()
+        # vis.create_window(visible=False)
+        # vis.add_geometry(pc1_o3d)
+        # vis.update_geometry(pc1_o3d)
+        # vis.poll_events()
+        # vis.update_renderer()
+        # vis.add
+        # vis.capture_screen_image(f"{exp_dir_path}/figure/pcd_{i}_gtflow.png")
+        # vis.destroy_window()
+        # custom_draw_geometry_with_key_callback([pc1_o3d])  # Press 'k' to see with dark background.
         
     return info_dict
 
@@ -182,7 +211,7 @@ def optimize_neural_prior(options, data_loader):
         timers = Timers()
         timers.tic("total_time")
 
-    save_dir_path = f"checkpoints/{options.exp_name}"
+    save_dir_path = options.exp_dir_path
 
     outputs = []
     
@@ -191,18 +220,21 @@ def optimize_neural_prior(options, data_loader):
     else:
         raise Exception("Model not available.")
 
+    if options.load_model_path is not None:
+        net.load_state_dict(torch.load(options.load_model_path))
+
     output_dir = os.path.join(save_dir_path,'sceneflow_nsfp')
     os.makedirs(output_dir,exist_ok=True)  
 
     for i, data in tqdm(enumerate(data_loader), total=len(data_loader), smoothing=0.9):
         logging.info(f"# Working on sample: {data_loader.dataset.datapath[i]}...")
 
-        pc1, pc2, flow = data
+        pc1, pc2, flow, camera = data
         
         if options.visualize:
             idx = 0
             # NOTE: ground truth flow
-            show_flows(pc1[idx], pc2[idx], flow[idx])
+            show_flows(pc1[idx], pc2[idx], flow[idx], options.exp_dir_path, sample_id = i, output_name='gt', camera=camera[idx])
 
         solver_generator = GeneratorWrap(solver(pc1, pc2, flow, options, net, i))
         
@@ -244,9 +276,13 @@ if __name__ == "__main__":
     config.add_config(parser)
     options = parser.parse_args()
 
-    exp_dir_path = f"checkpoints/{options.exp_name}"
+    exp_dir_path = f"/scratch/ag7644/nsfp/checkpoints/{options.exp_name}"
     if not os.path.exists(exp_dir_path):
         os.makedirs(exp_dir_path)
+    setattr(options, "exp_dir_path", exp_dir_path)
+
+    if not os.path.exists(f"{exp_dir_path}/model/"):
+        os.makedirs(f"{exp_dir_path}/model/")
 
     logging.basicConfig(
         level=logging.DEBUG,

@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
+import os
 import numpy as np
 import open3d as o3d
-# NOTE: need to comment this line if do not have GUI.
-from mayavi import mlab
+import argparse
 
 from collections import namedtuple
 from itertools import accumulate
@@ -18,47 +18,115 @@ PURPLE = (180/255, 142/255, 160/255)
 OPACITY = 1.0
 
 
-def show_flows(pc1, pc2, flow, inverse=False):
+def show_flows(pc1, pc2, flow, exp_dir_path, sample_id, output_name="", inverse=False, camera=None):
     if type(pc1) is not np.ndarray:
         pc1 = pc1.cpu().numpy()
         pc2 = pc2.cpu().numpy()
         flow = flow.detach().cpu().numpy()
 
+    pcd_path = f"{exp_dir_path}/pcd_vis"
+    if not os.path.exists(pcd_path):
+        os.makedirs(pcd_path)
+    pcd_sf_path = f"{exp_dir_path}/pcd_sf_vis"
+    if not os.path.exists(pcd_sf_path):
+        os.makedirs(pcd_sf_path)
+    
+    ins_mask1, ins_mask2 = None, None
+    if pc1.shape[-1]>3 and pc2.shape[-1]>3:
+        ins_mask1 = pc1[:, -1:]
+        ins_mask2 = pc2[:, -1:]
+        pc1 = pc1[:, :3]
+        pc2 = pc2[:, :3]
+
+        pcd_ins_path = f"{exp_dir_path}/pcd_ins_vis"
+        if not os.path.exists(pcd_ins_path):
+            os.makedirs(pcd_ins_path)
+    
     pc1_deform = pc1 + flow
 
-    OPACITY = 1.0
-    fig = mlab.figure(size=(800, 600), bgcolor=(1,1,1))
-    mlab.points3d(pc2[:,0], pc2[:,1], pc2[:,2], color=GREEN, figure=fig, opacity=OPACITY, scale_factor=0.07, resolution=25)
-    mlab.points3d(pc1[:,0], pc1[:,1], pc1[:,2], color=BLUE, figure=fig, opacity=1.0, scale_factor=0.07, resolution=25)
-
-    mlab.points3d(pc1_deform[:,0], pc1_deform[:,1], pc1_deform[:,2], color=RED, figure=fig, opacity=OPACITY, scale_factor=0.07, resolution=25)
-    obj = mlab.quiver3d(pc1[:,0], pc1[:,1], pc1[:,2], flow[:,0], flow[:,1], flow[:,2], mode='arrow', colormap='spring', scale_factor=1.0, line_width=0.001, resolution=25, opacity=0.3)
-
-    obj.glyph.glyph_source.glyph_source.tip_length = 0.05
-    obj.glyph.glyph_source.glyph_source.tip_radius = 0.02
-    obj.glyph.glyph_source.glyph_source.shaft_radius = 0.005
-    obj.glyph.glyph_source.glyph_source.shaft_resolution = 95
-    
-    mlab.show()
+    vis = o3d.visualization.Visualizer()
+    vis.create_window("visualizer", 1920, 1080, 0, 0, visible=False)
+    # vis.create_window("visualizer", 960, 540, 0, 0, visible=False)
     
     pc1_o3d = o3d.geometry.PointCloud()
     pc1_o3d.points = o3d.utility.Vector3dVector(pc1)
     pc1_o3d.paint_uniform_color(BLUE)
     pc1_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     pc1_o3d.orient_normals_to_align_with_direction()
+    vis.add_geometry(pc1_o3d)
+    vis.update_geometry(pc1_o3d)
 
     pc2_o3d = o3d.geometry.PointCloud()
     pc2_o3d.points = o3d.utility.Vector3dVector(pc2)
     pc2_o3d.paint_uniform_color(GREEN)
     pc2_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     pc2_o3d.orient_normals_to_align_with_direction()    
+    vis.add_geometry(pc2_o3d)
+    vis.update_geometry(pc2_o3d)
 
     pc1_def_o3d = o3d.geometry.PointCloud()
     pc1_def_o3d.points = o3d.utility.Vector3dVector(pc1_deform)
     pc1_def_o3d.paint_uniform_color(RED)
     pc1_def_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     pc1_def_o3d.orient_normals_to_align_with_direction()
-    o3d.visualization.draw_geometries([pc1_o3d, pc2_o3d, pc1_def_o3d])
+    vis.add_geometry(pc1_def_o3d)
+    vis.update_geometry(pc1_def_o3d)
+
+
+    render_options = vis.get_render_option()
+
+    vis.poll_events()
+    vis.update_renderer()
+    vis.capture_screen_image(f"{pcd_path}/pcd_{sample_id}_{output_name}.jpg")
+    vis.destroy_window()
+
+    # ANCHOR: new plot style
+    pc1_o3d = o3d.geometry.PointCloud()
+    colors_flow = flow_to_rgb(flow, background = 'dark')
+    pc1_o3d.points = o3d.utility.Vector3dVector(pc1)
+    pc1_o3d.colors = o3d.utility.Vector3dVector(colors_flow / 255.0)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(visible=False)
+    axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1, origin=[0, 0, 0])
+    vis.add_geometry(axis)
+
+    vis.add_geometry(pc1_o3d)
+    vis.update_geometry(pc1_o3d)
+
+    vis.poll_events()
+    vis.update_renderer()
+    vis.capture_screen_image(f"{pcd_sf_path}/pcd_sf_{sample_id}_{output_name}.png")
+    vis.destroy_window()
+
+
+    #Draw Instance Mask
+    if ins_mask1 is not None and ins_mask2 is not None:
+        ins_mask1 = np.repeat(ins_mask1, repeats=2, axis=1)
+        ins_mask2 = np.repeat(ins_mask2, repeats=2, axis=1)
+        pc1_o3d = o3d.geometry.PointCloud()
+        colors_ins = flow_to_rgb(ins_mask1, background = 'dark')
+        pc1_o3d.points = o3d.utility.Vector3dVector(pc1)
+        pc1_o3d.colors = o3d.utility.Vector3dVector(colors_ins / 255.0)
+
+        # pc2_o3d = o3d.geometry.PointCloud()
+        # colors_ins = flow_to_rgb(ins_mask2, background = 'dark')
+        # pc2_o3d.points = o3d.utility.Vector3dVector(pc2)
+        # pc2_o3d.colors = o3d.utility.Vector3dVector(colors_ins / 255.0)
+
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False)
+        axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1, origin=[0, 0, 0])
+        vis.add_geometry(axis)
+        vis.add_geometry(pc1_o3d)
+        vis.update_geometry(pc1_o3d)
+        # vis.poll_events()
+        # vis.add_geometry(pc2_o3d)
+        # vis.update_geometry(pc2_o3d)
+        vis.poll_events()
+        vis.update_renderer()
+        vis.capture_screen_image(f"{pcd_ins_path}/pcd_ins_{sample_id}_{output_name}.png")
+        vis.destroy_window()
 
 
 def make_colorwheel(transitions: tuple=DEFAULT_TRANSITIONS) -> np.ndarray:
@@ -289,4 +357,107 @@ def custom_draw_geometry_with_key_callback(pcds):
     key_to_callback[ord(",")] = capture_depth
     key_to_callback[ord(".")] = capture_image
     o3d.visualization.draw_geometries_with_key_callbacks(pcds, key_to_callback)
-    
+
+def custom_draw_geometry_with_camera_trajectory(pcd, camera_trajectory_path,
+                                                render_option_path,
+                                                output_path):
+    custom_draw_geometry_with_camera_trajectory.index = -1
+    custom_draw_geometry_with_camera_trajectory.trajectory =\
+        o3d.io.read_pinhole_camera_trajectory(camera_trajectory_path)
+    custom_draw_geometry_with_camera_trajectory.vis = o3d.visualization.Visualizer(
+    )
+    image_path = os.path.join(output_path, 'image')
+    if not os.path.exists(image_path):
+        os.makedirs(image_path)
+    depth_path = os.path.join(output_path, 'depth')
+    if not os.path.exists(depth_path):
+        os.makedirs(depth_path)
+
+    print("Saving color images in " + image_path)
+    print("Saving depth images in " + depth_path)
+
+    def move_forward(vis):
+        # This function is called within the o3d.visualization.Visualizer::run() loop
+        # The run loop calls the function, then re-render
+        # So the sequence in this function is to:
+        # 1. Capture frame
+        # 2. index++, check ending criteria
+        # 3. Set camera
+        # 4. (Re-render)
+        ctr = vis.get_view_control()
+        glb = custom_draw_geometry_with_camera_trajectory
+        if glb.index >= 0:
+            print("Capture image {:05d}".format(glb.index))
+            # Capture and save image using Open3D.
+            vis.capture_depth_image(
+                os.path.join(depth_path, "{:05d}.png".format(glb.index)), False)
+            vis.capture_screen_image(
+                os.path.join(image_path, "{:05d}.png".format(glb.index)), False)
+
+            # Example to save image using matplotlib.
+            '''
+            depth = vis.capture_depth_float_buffer()
+            image = vis.capture_screen_float_buffer()
+            plt.imsave(os.path.join(depth_path, "{:05d}.png".format(glb.index)),
+                       np.asarray(depth),
+                       dpi=1)
+            plt.imsave(os.path.join(image_path, "{:05d}.png".format(glb.index)),
+                       np.asarray(image),
+                       dpi=1)
+            '''
+
+        glb.index = glb.index + 1
+        if glb.index < len(glb.trajectory.parameters):
+            ctr.convert_from_pinhole_camera_parameters(
+                glb.trajectory.parameters[glb.index])
+        else:
+            custom_draw_geometry_with_camera_trajectory.vis.destroy_window()
+
+        # Return false as we don't need to call UpdateGeometry()
+        return False
+
+    vis = custom_draw_geometry_with_camera_trajectory.vis
+    vis.create_window()
+    vis.add_geometry(pcd)
+    vis.register_animation_callback(move_forward)
+    vis.run()  
+
+def main(dir_path):
+    outputs = sorted(os.listdir(dir_path))[1:]
+    pcd_sf_path = f"{dir_path}/../best_sf_output"
+    if not os.path.exists(pcd_sf_path):
+        os.makedirs(pcd_sf_path, exist_ok=True)
+
+    for idx,output in enumerate(outputs):
+        path = os.path.join(dir_path, output)
+        data = np.load(path)
+
+        pc1 = data["p1"].astype('float32')[0]
+        print(pc1.shape)
+        # pc2 = data["pc2"].astype('float32')
+        flow = data['flow'].astype('float32')[0]
+        
+        # ANCHOR: new plot style
+        pc1_o3d = o3d.geometry.PointCloud()
+        colors_flow = flow_to_rgb(flow, background = 'dark')
+        pc1_o3d.points = o3d.utility.Vector3dVector(pc1)
+        pc1_o3d.colors = o3d.utility.Vector3dVector(colors_flow / 255.0)
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False)
+        vis.add_geometry(pc1_o3d)
+        vis.update_geometry(pc1_o3d)
+        vis.poll_events()
+        vis.update_renderer()
+        vis.capture_screen_image(f"{pcd_sf_path}/pcd_sf_{idx}.png")
+        vis.destroy_window()
+
+        # new_plot(pc1,pc2, flow)
+        # print('finish:',path)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # parser.add_argument('--dir',default='/scratch/ag7644/nsfp/checkpoints/waymo_sf_debug11_1/sceneflow_nsfp/',help='path to the waymo open dataset')
+    parser.add_argument('--dir',default='/scratch/ag7644/nsfp/checkpoints/Argoverse_train_ins_3/sceneflow_nsfp',help='path to the waymo open dataset')
+    args = parser.parse_args()
+
+    main(args.dir)

@@ -4,6 +4,7 @@ from typing import Union
 import torch
 import torch.nn.functional as F
 from pytorch3d.ops.knn import knn_gather, knn_points
+from pytorch3d.ops import ball_query
 from pytorch3d.structures.pointclouds import Pointclouds
 
 
@@ -23,6 +24,22 @@ def _validate_chamfer_reduction_inputs(
     if point_reduction not in ["mean", "sum"]:
         raise ValueError('point_reduction must be one of ["mean", "sum"]')
 
+
+def component_bbox(pc1, pc2, ins_mask):
+    num_instances = torch.max(ins_mask).int().item()
+    ins_mask2 = torch.zeros(pc2.shape[:-1])
+    for i in range(1, num_instances+1):
+        mask = torch.nonzero(ins_mask[0, :, 0] == i).squeeze()
+        if torch.numel(mask)>0 and mask.dim()>0:
+            pc1_ins = pc1[:, mask]
+            dists, idx, _ = ball_query(pc1_ins, pc2, K=torch.numel(mask), radius=2.5)
+            pc2_idx, count = torch.unique(idx, sorted=False, return_counts=True)
+            if torch.numel(mask)<torch.numel(pc2_idx):
+                pc2_idx = pc2_idx[torch.topk(count, torch.numel(mask)).indices]
+            if pc2_idx.dim()>0 and torch.numel(pc2_idx)>0:
+                ins_mask2[:,pc2_idx] = i
+    ins_mask2 = torch.unsqueeze(ins_mask2, dim=-1)
+    return ins_mask2
 
 def _handle_pointcloud_input(
     points: Union[torch.Tensor, Pointclouds],
@@ -60,6 +77,43 @@ def _handle_pointcloud_input(
             + "(minibatch, num_points, 3)."
         )
     return X, lengths, normals
+
+def component_loss(flow, ins_mask, weight=0.1):
+    if ins_mask is None: return 0.0
+    num_instances = torch.max(ins_mask).int().item()
+    loss = 0.0
+    for i in range(1, num_instances+1):
+        mask = torch.nonzero(ins_mask[0, :, 0] == i).squeeze()
+        if torch.numel(mask)>0 and mask.dim()>0:
+            loss+= torch.pow(torch.cdist(flow[:,mask], flow[:,mask]), 2).sum()
+    return weight*(loss/num_instances)
+
+
+
+def chamfer_loss(
+    x,
+    y,
+    x_lengths=None,
+    y_lengths=None,
+    x_normals=None,
+    y_normals=None,
+    weights=None,
+    batch_reduction: Union[str, None] = "mean",
+    point_reduction: str = "mean",
+    ins_mask1 = None, 
+    ins_mask2 = None):
+
+    if ins_mask1 is None or ins_mask2 is None:
+        return my_chamfer_fn(x, y, x_lengths, y_lengths, x_normals, y_normals, weights, batch_reduction, point_reduction)
+    else:
+        num_instances = torch.max(ins_mask1).int().item()
+        dist = 0
+        for i in range(num_instances+1):
+            mask1, mask2 = torch.nonzero(ins_mask1[0, :, 0] == i).squeeze(), torch.nonzero(ins_mask2[0,:,0]==i).squeeze()
+            if torch.numel(mask1)>0 and torch.numel(mask2)>0 and mask1.dim()>0  and mask2.dim()>0:
+                cham_dist, _ = my_chamfer_fn(x[:,mask1], y[:,mask2])
+                dist+=cham_dist
+        return dist/(num_instances+1), None
 
 
 def my_chamfer_fn(

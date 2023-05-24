@@ -74,8 +74,8 @@ def main(waymo_root,split,output_dir,token, process_num, debug):
         FILENAME = os.path.join(train_root,filename)
         segment_dir = os.path.join(output_dir,filename.split('.')[0])
         os.makedirs(output_dir,exist_ok=True)
-        segment_img_dir = os.path.join(segment_dir,'image')
-        os.makedirs(segment_img_dir,exist_ok=True)
+        # segment_img_dir = os.path.join(segment_dir,'image')
+        # os.makedirs(segment_img_dir,exist_ok=True)
         segmenr_range_dir = os.path.join(segment_dir,'range')
         os.makedirs(segmenr_range_dir,exist_ok=True)
 
@@ -87,15 +87,6 @@ def main(waymo_root,split,output_dir,token, process_num, debug):
         for data in dataset:
             frame = open_dataset.Frame()
             frame.ParseFromString(bytearray(data.numpy()))
-
-            # only extract front-view img 
-            for index, image in enumerate(frame.images):
-                img = tf.image.decode_jpeg(image.image)
-                img = np.array(img)
-                I = Image.fromarray(np.uint8(img))
-                save_path = os.path.join(segment_img_dir,new_imgs[i])
-                I.save(save_path)
-                break
 
             # extract range
             range_images, camera_projections,range_image_top_pose = frame_utils.parse_range_image_and_camera_projection(frame)
@@ -116,8 +107,8 @@ def main(waymo_root,split,output_dir,token, process_num, debug):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--waymo_root',default='/vast/work/public/ml-datasets/waymo_open_dataset_scene_flow',help='path to the waymo open dataset')
-    parser.add_argument('--split',default='train',choices=['train','valid'])
-    parser.add_argument('--output_dir',default='/scratch/ag7644/waymo_sf_all/',help='path to save the data')
+    parser.add_argument('--split',default='valid',choices=['train','valid'])
+    parser.add_argument('--output_dir',default='/scratch/ag7644/waymo_sf_debug11/',help='path to save the data')
     parser.add_argument('--process', type=int, default=1, help = 'num workers to use')
     parser.add_argument('--debug',type=bool,default=False)
     args = parser.parse_args()

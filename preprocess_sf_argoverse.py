@@ -25,9 +25,11 @@ class PreProcessArgoverseDataset(Dataset):
         get_gt_tracks=True,
         max_correspondence_distance=1.0,
         log_id=None,
+        width = 1,
     ):
         self.partition = partition
         self.log_id = log_id
+        self.width = width
 
         self.remove_ground = remove_ground
         self.get_gt_tracks = get_gt_tracks
@@ -36,14 +38,14 @@ class PreProcessArgoverseDataset(Dataset):
         if self.partition == 'train':
             self.datapath = sorted(glob.glob(f"{dataset_path}/training/*/*/lidar/*"))
         elif self.partition == 'test':
-            self.datapath = sorted(glob.glob(f"{dataset_path}/testing/*/*/lidar/*"))
+            self.datapath = sorted(glob.glob(f"{dataset_path}/testing/*/lidar/*"))
         elif self.partition == 'val':
             self.datapath = sorted(glob.glob(f"{dataset_path}/val/*/lidar/*"))
             
         if self.log_id:
             self.datapath = [file for file in self.datapath if log_id in file]
 
-        if self.partition == "train":
+        if self.partition == "train" or self.partition == 'test':
             sample_every = 2
         else:
             sample_every = 10  # To don't get too repetitive for validation.
@@ -105,6 +107,7 @@ class PreProcessArgoverseDataset(Dataset):
         # ANCHOR: get pseudo flow annotations
         if self.get_gt_tracks:
             n1 = lidar_sweeps[0].ply.shape[0]
+            n2 = lidar_sweeps[1].ply.shape[0]
             tracks1_fpath = f"{dataset_dir}{log_id}/per_sweep_annotations_amodal/tracked_object_labels_{lidar_sweeps[0].timestamp}.json"
             tracks2_fpath = f"{dataset_dir}{log_id}/per_sweep_annotations_amodal/tracked_object_labels_{lidar_sweeps[1].timestamp}.json"
             objects1 = object_label.read_label(tracks1_fpath)
@@ -116,6 +119,9 @@ class PreProcessArgoverseDataset(Dataset):
             mask2_tracks_flow = []
 
             flow = np.zeros((n1, 3), dtype='float32')
+            # ins_mask1 = np.zeros((n1), dtype='float32')
+            # ins_mask2 = np.zeros((n2), dtype='float32')
+            # num_instances = 0
 
             for object1 in objects1:
                 if object1.occlusion == 100:
@@ -140,10 +146,16 @@ class PreProcessArgoverseDataset(Dataset):
 
                     translation = inbox_pc1_t - inbox_pc1
                     flow[indices, :] = translation
+                    
+                    #Instances being marked as 1-num_instances, 0 represents non-labled points
+                    # num_instances+=1
+                    # ins_mask1[indices] = num_instances
 
                     bbox2_3d = object2.as_3d_bbox()
                     inbox_pc2, is_valid2 = filter_point_cloud_to_bbox_3D_vectorized(bbox2_3d, lidar_sweeps[1].ply)
-                    mask2_tracks_flow.append(np.where(is_valid2 == True)[0])
+                    indices2 = np.where(is_valid2 == True)[0]
+                    mask2_tracks_flow.append(indices2)
+                    # ins_mask2[indices2] = num_instances
 
             # Compensate egomotion to get rigid flow.
             map_relative_to_base = lidar_sweeps[1].pose
@@ -161,6 +173,16 @@ class PreProcessArgoverseDataset(Dataset):
             mask1_no_tracks = np.setdiff1d(full_mask1, mask1_tracks_flow, assume_unique=True)
             mask2_no_tracks = np.setdiff1d(full_mask2, mask2_tracks_flow, assume_unique=True)
 
+            # #Apply Chamfer function to get Static Points with dist<0.2
+            # num_instances+=1
+            # pc1_no_tracks = np.expand_dims(points_t[mask1_no_tracks], axis=0)
+            # pc2_no_tracks = np.expand_dims(lidar_sweeps[1].ply[mask2_no_tracks], axis=0)
+            # dist1, _ = my_chamfer_fn(pc2_no_tracks, pc1_no_tracks, None, None)
+            # dist2, _ = my_chamfer_fn(pc1_no_tracks, pc2_no_tracks, None, None)
+            # ins_mask1[mask1_no_tracks] = np.where(dist1[0]<=0.2, num_instances, 0)
+            # ins_mask2[mask2_no_tracks] = np.where(dist2[0]<=0.2, num_instances, 0)
+
+
             pc1_o3d = o3d.geometry.PointCloud()
             pc1_o3d.points = o3d.utility.Vector3dVector(points_t[mask1_no_tracks])
             pc2_o3d = o3d.geometry.PointCloud()
@@ -168,12 +190,12 @@ class PreProcessArgoverseDataset(Dataset):
             
             # Apply point-to-point ICP
             trans_init = np.identity(4)
-            reg_p2p = o3d.registration.registration_icp(
+            reg_p2p = o3d.pipelines.registration.registration_icp(
                 pc1_o3d, pc2_o3d, 
                 self.max_correspondence_distance, 
                 trans_init, 
-                o3d.registration.TransformationEstimationPointToPoint(), 
-                o3d.registration.ICPConvergenceCriteria(max_iteration=100)
+                o3d.pipelines.registration.TransformationEstimationPointToPoint(), 
+                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100)
             )
             pc1_t_o3d = pc1_o3d.transform(reg_p2p.transformation)
             points_t_refined = np.asarray(pc1_t_o3d.points)
@@ -186,8 +208,15 @@ class PreProcessArgoverseDataset(Dataset):
         pc1 = lidar_sweeps[0].ply
         pc2 = lidar_sweeps[1].ply
 
+        #Append instance mask to PC
+        # ins_mask1 = np.expand_dims(ins_mask1, axis=1)
+        # ins_mask2 = np.expand_dims(ins_mask2, axis=1)
+        # pc1 = np.concatenate((pc1, ins_mask1), axis=1)
+        # pc2 = np.concatenate((pc2, ins_mask2), axis=1)
+
         # ANCHOR: save processed flow
         dataset_path = filename.split('argoverse-tracking')[0] + 'Argoverse_SceneFlow_remove_ground' + filename.split('argoverse-tracking')[1].split('lidar')[0]
+        # dataset_path = filename.split('argoverse-tracking')[0] + 'Argoverse_SceneFlow_ins' + filename.split('argoverse-tracking')[1].split('lidar')[0]
         outfile = str(lidar_sweeps[0].timestamp) + '_' + str(lidar_sweeps[1].timestamp) + '.npz'
 
         full_path = dataset_path + outfile
@@ -251,7 +280,7 @@ def get_lidar_sweeps(base_directory: Path, sweep_index: int, width: int) -> Opti
 
 
 if __name__ == "__main__":
-    dataset_path = '/dataset/argo/argoverse-tracking'   # NOTE: path to the original dataset
+    dataset_path = '/scratch/ag7644/argoverse/argoverse-tracking'   # NOTE: path to the original dataset
     
     # ANCHOR: hyperparameters
     remove_ground = True

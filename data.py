@@ -4,6 +4,7 @@
 import glob
 import numpy as np
 from torch.utils.data import Dataset
+import open3d as o3d
 
 
 class FlyingThings3D(Dataset):
@@ -160,7 +161,7 @@ class KITTISceneFlowDataset(Dataset):
             pc2 = pc2[sample_idx2, :].astype('float32')
             flow = flow[sample_idx1, :].astype('float32')
 
-        return pc1, pc2, flow
+        return pc1, pc2, flow, flow
 
 
 class ArgoverseSceneFlowDataset(Dataset):
@@ -172,7 +173,7 @@ class ArgoverseSceneFlowDataset(Dataset):
         if self.partition == 'train':
             self.datapath = sorted(glob.glob(f"{self.options.dataset_path}/training/*/*/*"))
         elif self.partition == 'test':
-            self.datapath = sorted(glob.glob(f"{self.options.dataset_path}/testing/*/*/*"))
+            self.datapath = sorted(glob.glob(f"{self.options.dataset_path}/testing/*/*"))
         elif self.partition == 'val':
             self.datapath = sorted(glob.glob(f"{self.options.dataset_path}/val/*/*"))
             
@@ -246,7 +247,7 @@ class ArgoverseSceneFlowDataset(Dataset):
             pc2_ = pc2[sample_idx2, :]
             pc2 = pc2_.astype('float32')
 
-        return pc1, pc2, flow
+        return pc1, pc2, flow, flow
 
 
 class NuScenesSceneFlowDataset(Dataset):
@@ -359,6 +360,20 @@ class WaymoSceneFlowDataset(Dataset):
         self.cache = {}
         self.cache_size = 30000
     
+    def subsample_points(self, current_frame, previous_frame, flows, num_points):
+        # current_frame.shape[0] == flows.shape[0]
+        if current_frame.shape[0] > num_points:
+            indexes_current_frame = np.linspace(0, current_frame.shape[0]-1, num=num_points).astype(int)
+            current_frame = current_frame[indexes_current_frame, :]
+            flows = flows[indexes_current_frame, :]
+        if previous_frame.shape[0] > num_points:
+            indexes_previous_frame = np.linspace(0, previous_frame.shape[0]-1, num=num_points).astype(int)
+            previous_frame = previous_frame[indexes_previous_frame, :]
+        current_frame = current_frame.astype('float32')
+        previous_frame = previous_frame.astype('float32')
+        flows = flows.astype('float32')
+        return current_frame, previous_frame, flows
+    
     def __len__(self):
         return len(self.datapath)
     
@@ -368,26 +383,10 @@ class WaymoSceneFlowDataset(Dataset):
             data = np.load(fp)
             pc1 = data['p1'].astype('float32')
             pc2 = data['p2'].astype('float32')
-            flow = data['gt'].astype('float32')[:,:3]
+            flow = data['flow'].astype('float32')[:,:3]
+            transform = data['transform'].astype('float32')
 
-        n1 = pc1.shape[0]
-        n2 = pc2.shape[0]
         if not self.options.use_all_points:
             num_points = self.options.num_points
-
-            if n1 >= num_points:
-                sample_idx1 = np.random.choice(n1, num_points, replace=False)
-            else:
-                sample_idx1 = np.concatenate((np.arange(n1), np.random.choice(n1, num_points - n1, replace=True)), axis=-1)
-
-            if n2 >= num_points:
-                sample_idx2 = np.random.choice(n2, num_points, replace=False)
-            else:
-                sample_idx2 = np.concatenate((np.arange(n2), np.random.choice(n2, num_points - n2, replace=True)), axis=-1)
-                
-            pc1 = pc1[sample_idx1, :].astype('float32')
-            pc2 = pc2[sample_idx2, :].astype('float32')
-            flow = flow[sample_idx1, :].astype('float32')
-
-            return pc1, pc2, flow, sample_idx1
-        return pc1, pc2, flow
+            pc1, pc2, flow = self.subsample_points(pc1, pc2, flow, num_points)
+        return pc1, pc2, flow, transform

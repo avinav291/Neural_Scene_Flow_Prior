@@ -63,3 +63,4 @@ def add_config(parser):
     parser.add_argument('--act_fn', type=str, default='relu', metavar='AF', help='activation function for neural prior.')
     parser.add_argument('--backward_flow', action='store_true', default=True, help='use backward flow or not.')
     parser.add_argument('--early_patience', type=int, default=100, help='patience in early stopping.')
+    parser.add_argument('--load_model_path', type=str, default=None, help='Path for pretrained model.')
